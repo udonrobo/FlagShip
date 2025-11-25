@@ -100,7 +100,6 @@
     <ClCompile Include="Pathfinder.cpp" />
     <ClCompile Include="ThemeController.cpp" />
     <QtRcc Include="qml.qrc" />
-    <None Include="icon.aps" />
     <None Include="main.qml" />
   </ItemGroup>
   <ItemGroup>
@@ -111,12 +110,6 @@
     <ClInclude Include="Pathfinder.h" />
     <QtMoc Include="ThemeController.h" />
     <QtMoc Include="MapView.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <ResourceCompile Include="icon.rc" />
-  </ItemGroup>
-  <ItemGroup>
-    <Image Include="Karato.ico" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

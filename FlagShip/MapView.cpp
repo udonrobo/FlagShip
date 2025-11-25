@@ -291,10 +291,10 @@ void MapView::paint(QPainter* p)
     }
 
     // 中心十字
-    if (m_showCrosshair) {
+    {
         qreal cx = bound.width() / 2.0;
         qreal cy = bound.height() / 2.0;
-        p->setPen(QPen(Qt::red, 1.5 / m_scale));
+        p->setPen(QPen(Qt::white, 2.0 / m_scale));
         p->drawLine(QPointF(cx, 0), QPointF(cx, bound.height()));
         p->drawLine(QPointF(0, cy), QPointF(bound.width(), cy));
     }

@@ -329,8 +329,17 @@ ApplicationWindow {
                     // --- 表示・編集設定 ---
                     Label { text: qsTr("Display & Edit"); color: theme.textCol; font.pixelSize: 16; }
                     ColumnLayout {
-                        Switch { id: swCross; text: qsTr("Center Crosshair") }
-                        Switch { id: swSafe; text: qsTr("Visualize Safety Zone") }
+                        Switch {
+                            id: swSafe
+                            text: qsTr("Visualize Safety Zone")
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: theme.textCol
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
+                        }
                     }
 
                     GridLayout {
@@ -533,6 +542,7 @@ ApplicationWindow {
                         placeholderText: "e.g., 500"
                         Layout.fillWidth: true
                         color: theme.textCol
+                        placeholderTextColor: theme.textMuted
                         background: Rectangle { color: theme.inpBg; radius: 4; border.color: theme.inpBorder }
                     }
                     
@@ -567,6 +577,7 @@ ApplicationWindow {
                         TextField {
                             id: inpNs
                             Layout.fillWidth: true
+                            color: theme.textCol
                             placeholderText: "PathData"
                             text: backend.namespaceName
                             onTextChanged: backend.namespaceName = text
