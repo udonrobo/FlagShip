@@ -99,11 +99,68 @@ ApplicationWindow {
                 }
             }
 
+            // --- 追加箇所 1: プログレスバーオーバーレイ ---
+            Rectangle {
+                anchors.centerIn: parent
+                width: 300
+                height: 100
+                color: theme.panelBg
+                radius: 10
+                border.color: theme.inpBorder
+                border.width: 2
+                visible: map.isFindingPath // C++のプロパティを監視
+                z: 100 // 最前面に表示
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 10
+                    width: parent.width - 40
+                    
+                    Text {
+                        text: qsTr("Calculating Path...")
+                        color: theme.textCol
+                        font.bold: true
+                        font.pixelSize: 16
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+
+                    ProgressBar {
+                        id: pbar
+                        Layout.fillWidth: true
+                        from: 0.0
+                        to: 1.0
+                        value: map.searchProgress // C++のプロパティを監視
+                    }
+                    
+                    Text {
+                        text: Math.round(map.searchProgress * 100) + "%"
+                        color: theme.textCol
+                        font.pixelSize: 12
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+                }
+            }
+            
+            // --- 追加箇所 2: 探索中の操作ブロック ---
+            MouseArea {
+                anchors.fill: parent
+                visible: map.isFindingPath
+                hoverEnabled: true
+                onPressed: (mouse) => { mouse.accepted = true; } // 入力を吸い取る
+                onWheel: (wheel) => { wheel.accepted = true; }
+                z: 99
+                cursorShape: Qt.WaitCursor
+            }
+            // ------------------------------------------
+
             MouseArea {
                 anchors.fill: parent
                 acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                 hoverEnabled: true
                 property point pressPos: Qt.point(0,0)
+
+                // 操作ブロック中は無効化
+                enabled: !map.isFindingPath
 
                 onPositionChanged: (mouse) => {
                     if (mouse.buttons & (Qt.RightButton | Qt.MiddleButton)) {
@@ -523,13 +580,18 @@ ApplicationWindow {
                         }
                     }
       
+                    // --- 変更箇所: ボタンの制御 ---
                     Button {
                         id: btnFind
-                        text: qsTr("Find Path")
+                        // 探索中はテキスト変更
+                        text: map.isFindingPath ? qsTr("Finding...") : qsTr("Find Path")
                         onClicked: map.findPath()
+                        // 探索中は無効化
+                        enabled: !map.isFindingPath
                         Layout.topMargin: 5
                         font.bold: true
                     }
+                    // -----------------------------
 
                     Rectangle { height: 1; color: theme.inpBorder; Layout.fillWidth: true; Layout.topMargin: 10; Layout.bottomMargin: 5 }
                     
@@ -636,5 +698,74 @@ ApplicationWindow {
                 }
             }
         }
+    }
+
+    Popup {
+        id: popErr
+        y: root.height - (height + 20)
+        x: (root.width - width) / 2
+        width: 400
+        height: errTxt.implicitHeight + 20
+        modal: false
+        dim: false
+        closePolicy: Popup.CloseOnEscape
+
+        property var autoClose: Timer {
+            interval: 4000
+            onTriggered: popErr.close()
+        }
+        onOpened: autoClose.start()
+        onClosed: autoClose.stop()
+
+        property alias text: errTxt.text
+
+        background: Rectangle {
+            color: "#D32F2F"
+            radius: 8
+            border.color: Qt.darker("#D32F2F"); border.width: 1
+        }
+
+        contentItem: Text {
+            id: errTxt
+            text: "Error"
+            color: "white"
+            font.bold: true
+            wrapMode: Text.WordWrap
+            padding: 10
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
+
+    Dialog {
+        id: dlgLoop
+        title: qsTr("Confirm Loop Mode")
+        standardButtons: Dialog.Yes | Dialog.No
+        modal: true
+        width: 400
+        
+        contentItem: Text {
+            text: qsTr("Enabling loop mode will clear all existing Waypoints, Start, and Goal points. Continue?")
+            wrapMode: Text.WordWrap
+            padding: 10
+        }
+        onAccepted: map.confirmLoopModeActivation();
+        onRejected: {} 
+    }
+
+    Dialog {
+        id: dlgNonLoop
+        title: qsTr("Confirm Non-Loop Mode")
+        standardButtons: Dialog.Yes | Dialog.No
+        modal: true
+        width: 400
+        
+        contentItem: Text {
+            text: qsTr("Disabling loop mode will clear all existing Waypoints. Continue?")
+            wrapMode: Text.WordWrap
+            padding: 10
+        }
+        onAccepted: map.confirmNonLoopModeActivation();
+        onRejected: {}
     }
 }

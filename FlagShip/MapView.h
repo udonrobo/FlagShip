@@ -11,6 +11,7 @@
 #include <memory>
 #include <QTimer>
 #include <QUndoStack>
+#include <QThread>
 
 namespace Pathfinding {
     class Pathfinder;
@@ -21,6 +22,43 @@ class MoveObstacleCommand;
 class AddWaypointCommand;
 class DeleteWaypointCommand;
 class MoveWaypointCommand;
+
+// 探索ワーカースレッド用クラス
+class PathfindingWorker : public QObject {
+    Q_OBJECT
+public:
+    // 依存関係を断ち切るため、必要なデータを全て受け取る
+    struct InputData {
+        int w, h, res;
+        float robotW, robotH;
+        float safeThresh;
+        qreal edgeThresh;
+        int mode; // MapView::PathMode
+        bool useWpField;
+        bool isLoop;
+        int pfMode; // MapView::PathfindingMode
+        float tension;
+        int iter;
+
+        QPointF start;
+        QPointF goal;
+        QList<QPointF> wps;
+        QList<int> wpModes; // 0 or 1
+        QList<QRectF> obstacles;
+    };
+
+    explicit PathfindingWorker(const InputData& data, QObject* parent = nullptr);
+
+public slots:
+    void process();
+
+signals:
+    void progressChanged(float progress);
+    void finished(const QList<QList<QPointF>>& segments, bool failed, int failIdx, QString msg);
+
+private:
+    InputData m_data;
+};
 
 class MapView : public QQuickPaintedItem
 {
@@ -63,6 +101,10 @@ class MapView : public QQuickPaintedItem
         Q_PROPERTY(int smoothingIterations READ smoothingIterations WRITE setSmoothingIterations NOTIFY smoothingIterationsChanged)
         Q_PROPERTY(int guidanceStrength READ guidanceStrength WRITE setGuidanceStrength NOTIFY guidanceStrengthChanged)
         Q_PROPERTY(bool loopPath READ loopPath WRITE setLoopPath NOTIFY loopPathChanged)
+
+        // 進捗表示用プロパティ
+        Q_PROPERTY(bool isFindingPath READ isFindingPath NOTIFY isFindingPathChanged)
+        Q_PROPERTY(float searchProgress READ searchProgress NOTIFY searchProgressChanged)
 
 public:
     explicit MapView(QQuickItem* parent = nullptr);
@@ -113,7 +155,6 @@ public:
     QList<QPointF> getFoundPath() const;
     QList<QList<QPointF>> getFoundPathSegments() const;
 
-    // スタート・ゴール取得用
     QPointF getStartPoint() const;
     bool hasStartPoint() const;
     QPointF getGoalPoint() const;
@@ -172,7 +213,10 @@ public:
     bool loopPath() const;
     void setLoopPath(bool loop);
 
-    // データロード用メソッド (start/goal引数を追加)
+    // プロパティゲッター
+    bool isFindingPath() const { return m_isFinding; }
+    float searchProgress() const { return m_progress; }
+
     void loadMapData(int res, int w, int h, float robotW, float robotH,
         int smoothIter, const QString& searchMode,
         const QList<QPointF>& wps, const QList<int>& wpModes,
@@ -234,6 +278,14 @@ signals:
     void requestLoopModeConfirmation();
     void requestNonLoopModeConfirmation();
 
+    // 追加シグナル
+    void isFindingPathChanged();
+    void searchProgressChanged();
+
+private slots:
+    void onPathfindingFinished(const QList<QList<QPointF>>& segments, bool failed, int failIdx, const QString& msg);
+    void onPathfindingProgress(float p);
+
 private:
     void handleLeftClickInWaypointMode(const QPointF& worldPos, bool isCtrlPressed);
     void handleLeftClickInObstacleMode(const QPointF& worldPos, bool isCtrlPressed);
@@ -289,6 +341,7 @@ private:
     qreal m_edgeThresh = 0.0;
     bool m_showSafeZone = false;
 
+    // メインスレッド用（C-Space表示用）
     std::unique_ptr<Pathfinding::Pathfinder> m_finder;
     QUndoStack* m_undo;
 
@@ -306,6 +359,10 @@ private:
     QPointF m_moveStartPos;
     QRectF m_moveStartRect;
     QPointF m_lastSnapPos;
+
+    // スレッド管理
+    bool m_isFinding = false;
+    float m_progress = 0.0f;
 };
 
 #endif // MAPVIEW_H

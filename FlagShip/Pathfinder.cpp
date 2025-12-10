@@ -1,5 +1,4 @@
 ﻿#include "Pathfinder.h"
-#include "mapView.h"
 #include <cmath>
 #include <queue>
 #include <vector>
@@ -14,18 +13,27 @@ namespace Pathfinding {
         }
     };
 
-    Pathfinder::Pathfinder(MapView* map) : m_map(map)
+    Pathfinder::Pathfinder()
     {
     }
 
-    QList<QPoint> Pathfinder::findPath(const QPoint& start, const QPoint& goal, MapView::PathMode mode, float safeThresh, qreal edgeThresh, bool useWpField)
+    void Pathfinder::setConfig(const PathfinderConfig& config) {
+        m_cfg = config;
+        m_gridW = m_cfg.mapW;
+        m_gridH = m_cfg.mapH;
+    }
+
+    QList<QPoint> Pathfinder::findPath(const QPoint& start, const QPoint& goal, std::function<void(float)> progressCallback)
     {
-        if (!m_map) return {};
+        if (m_gridW <= 0 || m_gridH <= 0) return {};
 
         // グリッド再生成
-        generateConfigurationSpace(mode, safeThresh, edgeThresh);
-        if (mode == MapView::PathMode::Safe) {
+        generateConfigurationSpace();
+        if (m_cfg.mode == 0) {
             generateDistanceField();
+        }
+        if (m_cfg.useWpField) {
+            generateWaypointField();
         }
 
         // スタート/ゴールの有効性確認と補正
@@ -48,6 +56,7 @@ namespace Pathfinding {
 
         // A* 探索初期化
         std::priority_queue<Node*, std::vector<Node*>, CompareNode> openList;
+        // 注意: 巨大マップの場合、このメモリ確保が重い可能性があるが、ヒープ上なのでスタックオーバーフローはしないはず
         std::vector<std::vector<Node>> allNodes(m_gridH, std::vector<Node>(m_gridW));
 
         Node* startNode = &allNodes[s.y()][s.x()];
@@ -57,18 +66,37 @@ namespace Pathfinding {
 
         // 探索範囲の制限 (楕円コリドー)
         const int lowerBound = heuristic(s, g);
-        const int limitCost = int(m_detourFact * lowerBound) + m_detourMargin * 10;
+        const int limitCost = int(m_cfg.detourFact * lowerBound) + m_cfg.detourMargin * 10;
 
         openList.push(startNode);
 
         int dx[] = { 0, 0, 1, -1, 1, 1, -1, -1 };
         int dy[] = { 1, -1, 0, 0, 1, -1, 1, -1 };
 
+        int iterations = 0;
+        const int progressInterval = 1000;
+
+        // 進捗計算用の推定総コスト（単純なヒューリスティック距離）
+        float estimatedTotal = static_cast<float>(heuristic(s, g));
+        if (estimatedTotal < 1.0f) estimatedTotal = 1.0f;
+
         while (!openList.empty()) {
             Node* curr = openList.top();
             openList.pop();
 
+            // 進捗通知
+            if (progressCallback && (++iterations % progressInterval == 0)) {
+                // 現在のGコスト / (現在のG + 残りH) で進捗を推定（非単調だが目安になる）
+                // もしくは G / limitCost
+                float p = 0.0f;
+                if (limitCost > 0) {
+                    p = static_cast<float>(curr->gCost) / static_cast<float>(limitCost);
+                }
+                progressCallback(std::min(0.99f, p));
+            }
+
             if (curr->pos == g) {
+                if (progressCallback) progressCallback(1.0f);
                 QList<QPoint> path;
                 Node* t = curr;
                 while (t != nullptr) {
@@ -86,34 +114,30 @@ namespace Pathfinding {
                 if (next.x() < 0 || next.x() >= m_gridW || next.y() < 0 || next.y() >= m_gridH) continue;
                 if (m_grid[next.y()][next.x()] != 0) continue;
 
-                // 斜め移動の角抜け判定
                 if (i >= 4) {
                     if (m_grid[curr->pos.y()][next.x()] != 0 || m_grid[next.y()][curr->pos.x()] != 0) continue;
                 }
 
-                // 枝刈り
                 if (heuristic(s, next) + heuristic(next, g) > limitCost) continue;
 
                 Node* neighbor = &allNodes[next.y()][next.x()];
-                int moveCost = (i < 4) ? 10 : 15; // 斜めは少しコスト増
+                int moveCost = (i < 4) ? 10 : 15;
 
-                // 安全コスト (壁に近いほど高コスト)
                 int penalty = 0;
-                if (mode == MapView::PathMode::Safe && !m_distField.empty()) {
+                if (m_cfg.mode == 0 && !m_distField.empty()) { // Safe mode
                     int d = m_distField[next.y()][next.x()];
-                    int r = m_map->resolution();
+                    int r = m_cfg.resolution;
                     if (r <= 0) r = 10;
                     const double d_mm = std::max(0, d) * double(r);
                     const double w = 5e5;
                     penalty = int(w / ((d_mm + 1.0) * (d_mm + 1.0)));
                 }
 
-                // ウェイポイント誘導コスト
                 int attract = 0;
-                if (useWpField && !m_wpField.empty()) {
+                if (m_cfg.useWpField && !m_wpField.empty()) {
                     int dist = m_wpField[next.y()][next.x()];
                     if (dist > 0) {
-                        int r = m_map->resolution();
+                        int r = m_cfg.resolution;
                         if (r <= 0) r = 10;
                         attract = dist * r;
                     }
@@ -216,7 +240,6 @@ namespace Pathfinding {
         if (path.size() < 2 || segRes < 1) return path;
 
         QList<QPointF> pts;
-        // 仮想的な始点・終点を追加して補間
         pts.append(2 * path.first() - path.at(1));
         pts.append(path);
         pts.append(2 * path.last() - path.at(path.size() - 2));
@@ -251,7 +274,6 @@ namespace Pathfinding {
             }
             next.append(curr.last());
 
-            // 衝突チェック
             bool collide = false;
             for (int k = 0; k < next.size() - 1; ++k) {
                 if (!isGridCollisionFree(next[k], next[k + 1])) {
@@ -294,7 +316,7 @@ namespace Pathfinding {
 
     bool Pathfinder::isWorldPathCollisionFree(const QPointF& p1, const QPointF& p2) const
     {
-        int res = m_map->resolution();
+        int res = m_cfg.resolution;
         if (res <= 0) return false;
         return isGridCollisionFree(
             QPoint(qFloor(p1.x() / res), qFloor(p1.y() / res)),
@@ -302,24 +324,20 @@ namespace Pathfinding {
         );
     }
 
-    void Pathfinder::generateConfigurationSpace(MapView::PathMode mode, float safeThresh, qreal edgeThresh)
+    void Pathfinder::generateConfigurationSpace()
     {
-        if (!m_map) return;
-        m_gridW = m_map->mapWidth();
-        m_gridH = m_map->mapHeight();
+        if (m_gridW <= 0 || m_gridH <= 0) return;
         m_grid.assign(m_gridH, std::vector<int>(m_gridW, 0));
 
-        int res = m_map->resolution();
+        int res = m_cfg.resolution;
         if (res <= 0) return;
 
-        // 障害物の膨張
-        qreal inflate = qMax(m_map->robotWidth(), m_map->robotHeight()) / 2.0;
-        if (mode == MapView::PathMode::Safe) {
-            inflate *= safeThresh;
+        qreal inflate = qMax(m_cfg.robotW, m_cfg.robotH) / 2.0;
+        if (m_cfg.mode == 0) { // Safe
+            inflate *= m_cfg.safeThresh;
         }
 
-        // 障害物配置
-        for (const QRectF& r : m_map->getObstacles()) {
+        for (const QRectF& r : m_cfg.obstacles) {
             QRectF infR = r.adjusted(-inflate, -inflate, inflate, inflate);
             int sx = qFloor(infR.left() / res);
             int sy = qFloor(infR.top() / res);
@@ -338,9 +356,8 @@ namespace Pathfinding {
             }
         }
 
-        // マップ境界の安全マージン
-        if (edgeThresh > 0) {
-            int edge = qCeil(edgeThresh / res);
+        if (m_cfg.edgeThresh > 0) {
+            int edge = qCeil(m_cfg.edgeThresh / res);
             if (edge > 0) {
                 for (int y = 0; y < m_gridH; ++y) {
                     for (int x = 0; x < m_gridW; ++x) {
@@ -355,23 +372,15 @@ namespace Pathfinding {
 
     void Pathfinder::generateDistanceField()
     {
+        if (m_gridW <= 0 || m_gridH <= 0) return;
         m_distField.assign(m_gridH, std::vector<int>(m_gridW, -1));
         std::queue<QPoint> q;
-        int res = m_map->resolution();
+        int res = m_cfg.resolution;
         if (res <= 0) return;
 
-        // 障害物セルの特定とキューへの追加
         for (int y = 0; y < m_gridH; ++y) {
             for (int x = 0; x < m_gridW; ++x) {
-                bool isObs = false;
-                for (const QRectF& r : m_map->getObstacles()) {
-                    QRect gr(qFloor(r.left() / res), qFloor(r.top() / res), qCeil(r.width() / res), qCeil(r.height() / res));
-                    if (gr.contains(QPoint(x, y))) {
-                        isObs = true;
-                        break;
-                    }
-                }
-                if (isObs) {
+                if (m_grid[y][x] == 1) { // 障害物
                     q.push(QPoint(x, y));
                     m_distField[y][x] = 0;
                 }
@@ -395,15 +404,14 @@ namespace Pathfinding {
     }
 
     void Pathfinder::generateWaypointField() {
-        if (!m_map || m_gridW == 0 || m_gridH == 0) return;
+        if (m_gridW <= 0 || m_gridH <= 0) return;
 
         m_wpField.assign(m_gridH, std::vector<int>(m_gridW, -1));
         std::queue<QPoint> q;
-        int res = m_map->resolution();
+        int res = m_cfg.resolution;
         if (res <= 0) return;
 
-        QList<QPointF> wps = m_map->getWaypoints();
-        for (const QPointF& wp : wps) {
+        for (const QPointF& wp : m_cfg.waypoints) {
             QPoint p(qFloor(wp.x() / res), qFloor(wp.y() / res));
             if (p.x() >= 0 && p.x() < m_gridW && p.y() >= 0 && p.y() < m_gridH && m_wpField[p.y()][p.x()] == -1) {
                 m_wpField[p.y()][p.x()] = 0;
@@ -431,7 +439,6 @@ namespace Pathfinding {
     {
         int dx = std::abs(a.x() - b.x());
         int dy = std::abs(a.y() - b.y());
-        // Octile距離
         return 10 * (dx + dy) + (14 - 2 * 10) * std::min(dx, dy);
     }
 
@@ -453,7 +460,6 @@ namespace Pathfinding {
             visited[p.y()][p.x()] = true;
         }
         else {
-            qWarning() << "Start point out of bounds.";
             return QPoint(-1, -1);
         }
 

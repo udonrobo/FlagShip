@@ -7,6 +7,7 @@
 #include <QTimer>
 #include <QUndoStack>
 #include <QLineF>
+#include <QThread>
 
 namespace {
     const QList<QColor> WP_COLORS = {
@@ -17,14 +18,181 @@ namespace {
     };
 }
 
+PathfindingWorker::PathfindingWorker(const InputData& data, QObject* parent)
+    : QObject(parent), m_data(data)
+{
+}
+
+void PathfindingWorker::process() {
+    Pathfinding::Pathfinder finder;
+    Pathfinding::PathfinderConfig cfg;
+    cfg.mapW = m_data.w;
+    cfg.mapH = m_data.h;
+    cfg.resolution = m_data.res;
+    cfg.robotW = m_data.robotW;
+    cfg.robotH = m_data.robotH;
+    cfg.obstacles = m_data.obstacles;
+    cfg.waypoints = m_data.wps;
+    cfg.mode = 0;
+    cfg.safeThresh = m_data.safeThresh;
+    cfg.edgeThresh = m_data.edgeThresh;
+    cfg.useWpField = (m_data.pfMode == 2);
+
+    finder.setConfig(cfg);
+
+    QList<QList<QPointF>> segs;
+    bool fail = false;
+    int failIdx = -1;
+    QString failMsg;
+
+    auto gridToWorld = [&](const QList<QPoint>& gridPath) {
+        QList<QPointF> world;
+        if (m_data.res <= 0) return world;
+        for (const QPoint& p : gridPath) {
+            world.append(QPointF((p.x() + 0.5) * m_data.res, (p.y() + 0.5) * m_data.res));
+        }
+        return world;
+        };
+
+    QList<QPointF> pts;
+    if (m_data.isLoop) {
+        if (m_data.wps.count() < 2) {
+            emit finished({}, true, -1, "Loop requires at least 2 waypoints.");
+            return;
+        }
+        pts = m_data.wps;
+        pts.append(m_data.wps.first());
+    }
+    else {
+        if (!m_data.start.isNull()) pts.append(m_data.start);
+        pts.append(m_data.wps);
+        if (!m_data.goal.isNull()) pts.append(m_data.goal);
+    }
+
+    if (pts.size() < 2) {
+        emit finished({}, true, -1, "Not enough points (Start/Goal or Waypoints missing).");
+        return;
+    }
+
+    int totalSegments = pts.size() - 1;
+
+    if (!m_data.isLoop && m_data.pfMode == 0) {
+        cfg.mode = 0;
+        finder.setConfig(cfg);
+
+        QPoint sc(m_data.start.x() / m_data.res, m_data.start.y() / m_data.res);
+        QPoint gc(m_data.goal.x() / m_data.res, m_data.goal.y() / m_data.res);
+
+        auto path = finder.findPath(sc, gc, [&](float p) { emit progressChanged(p); });
+
+        if (path.isEmpty()) {
+            emit finished({}, true, 0, "Path failed (Direct).");
+            return;
+        }
+        auto pulled = finder.smoothPathStringPulling(path);
+        auto world = gridToWorld(pulled);
+        if (world.size() >= 2) {
+            segs.append(finder.smoothPathCatmullRom(world, m_data.tension, 30));
+        }
+        else {
+            segs.append(world);
+        }
+    }
+    else {
+        // Multi-segment
+        QList<QList<QPointF>> ctrlSegs;
+        QList<QPointF> allCtrl;
+
+        for (int i = 0; i < pts.size() - 1; ++i) {
+            emit progressChanged((float)i / (float)totalSegments);
+
+            QPoint s(pts[i].x() / m_data.res, pts[i].y() / m_data.res);
+            QPoint g(pts[i + 1].x() / m_data.res, pts[i + 1].y() / m_data.res);
+
+            int midx = i;
+            if (m_data.isLoop) midx = (i < m_data.wps.size()) ? i : m_data.wps.size() - 1;
+            else midx = i;
+
+            int modeVal = 0;
+            if (midx < m_data.wpModes.size()) modeVal = m_data.wpModes[midx];
+
+            cfg.mode = modeVal;
+            finder.setConfig(cfg);
+
+            auto path = finder.findPath(s, g, [&](float p) {
+                // Local segment progress mixed with global
+                float base = (float)i / totalSegments;
+                float segPart = (1.0f / totalSegments) * p;
+                emit progressChanged(base + segPart);
+                });
+
+            if (path.isEmpty()) {
+                fail = true;
+                failIdx = i;
+                failMsg = m_data.isLoop
+                    ? QString("Loop path failed at WP %1 -> %2").arg(i).arg((i + 1) % m_data.wps.count())
+                    : QString("Path failed at segment %1 -> %2").arg(i).arg(i + 1);
+                emit finished({}, true, failIdx, failMsg);
+                return;
+            }
+
+            auto pulled = finder.smoothPathStringPulling(path);
+            auto world = gridToWorld(pulled);
+
+            if (world.size() < 2) {
+                world.clear();
+                world.append(pts[i]);
+                world.append(pts[i + 1]);
+            }
+
+            ctrlSegs.append(world);
+            if (allCtrl.isEmpty()) allCtrl.append(world);
+            else allCtrl.append(world.mid(1));
+        }
+
+        if (allCtrl.size() < 2) {
+            segs = ctrlSegs;
+        }
+        else {
+            auto smooth = finder.smoothPathCatmullRom(allCtrl, m_data.tension, 30);
+            int startIdx = 0;
+            for (int i = 0; i < ctrlSegs.size(); ++i) {
+                int pairs = qMax(0, (int)ctrlSegs[i].size() - 1);
+                int ptsCount = pairs * 30;
+                int take = ptsCount + 1;
+                if (i == ctrlSegs.size() - 1) segs.append(smooth.mid(startIdx));
+                else segs.append(smooth.mid(startIdx, take));
+                startIdx += ptsCount;
+            }
+        }
+
+        if (m_data.isLoop) {
+            QList<QList<QPointF>> resampled;
+            double ds = qMax(1.0, (double)m_data.res);
+            for (const auto& s : segs) {
+                resampled.append(finder.resampleByArcLength(s, ds));
+            }
+            segs = resampled;
+        }
+    }
+
+    emit progressChanged(1.0f);
+    emit finished(segs, false, -1, "");
+}
+
+// -------------------------------------------------------------------------
+// MapView Implementation
+// -------------------------------------------------------------------------
+
 MapView::MapView(QQuickItem* parent) : QQuickPaintedItem(parent)
 {
-    m_finder = std::make_unique<Pathfinding::Pathfinder>(this);
+    m_finder = std::make_unique<Pathfinding::Pathfinder>();
     m_undo = new QUndoStack(this);
     QTimer::singleShot(0, this, &MapView::resetView);
 }
 
-MapView::~MapView() = default;
+MapView::~MapView() {
+}
 
 static QRectF getMapRect(int w, int h, int res) {
     return QRectF(0, 0, w * res, h * res);
@@ -900,135 +1068,86 @@ void MapView::handleLeftClickInLoopStartPlacementMode(const QPointF&) {
 
 void MapView::findPath()
 {
+    if (m_isFinding) return;
+
     m_pfFail = false;
     m_failSegIdx = -1;
     m_segs.clear();
+    m_progress = 0.0f;
+    emit searchProgressChanged();
     update();
-
-    auto gridToWorld = [&](const QList<QPoint>& gridPath) {
-        QList<QPointF> world;
-        if (m_res <= 0) return world;
-        for (const QPoint& p : gridPath) {
-            world.append(QPointF((p.x() + 0.5) * m_res, (p.y() + 0.5) * m_res));
-        }
-        return world;
-        };
-
-    auto handleFail = [&](int idx, bool loop) {
-        m_pfFail = true;
-        m_failSegIdx = idx;
-        QString msg = loop
-            ? QString("Loop path failed at WP %1 -> %2").arg(idx).arg((idx + 1) % m_wps.count())
-            : QString("Path failed at segment %1 -> %2").arg(idx).arg(idx + 1);
-        emit pathfindingFailed(msg);
-        update();
-        };
-
-    const int splineRes = 30;
-    QList<QPointF> pts;
 
     if (m_isLoop) {
         if (m_wps.count() < 2) {
             emit pathfindingFailed("Loop requires at least 2 waypoints.");
             return;
         }
-        pts = m_wps;
-        pts.append(m_wps.first());
     }
     else {
         if (!m_hasStart || !m_hasGoal) {
             emit pathfindingFailed("Start or Goal not set.");
             return;
         }
-        pts.append(m_start);
-        pts.append(m_wps);
-        pts.append(m_goal);
     }
 
-    if (pts.size() < 2) return;
+    PathfindingWorker::InputData data;
+    data.w = m_mapW;
+    data.h = m_mapH;
+    data.res = m_res;
+    data.robotW = m_robotW;
+    data.robotH = m_robotH;
+    data.safeThresh = m_safeThresh;
+    data.edgeThresh = m_edgeThresh;
+    data.obstacles = m_obs;
+    data.wps = m_wps;
 
-    if (!m_isLoop && m_pfMode == PathfindingMode::Direct) {
-        m_finder->generateWaypointField();
-        QPoint sc(m_start.x() / m_res, m_start.y() / m_res);
-        QPoint gc(m_goal.x() / m_res, m_goal.y() / m_res);
+    data.wpModes.clear();
+    for (auto m : m_wpModes) data.wpModes.append(m == PathMode::Safe ? 0 : 1);
 
-        auto path = m_finder->findPath(sc, gc, PathMode::Safe, m_safeThresh, m_edgeThresh, true);
-        if (path.isEmpty()) {
-            handleFail(0, false);
-            return;
-        }
+    data.start = m_start;
+    data.goal = m_goal;
+    data.isLoop = m_isLoop;
 
-        auto pulled = m_finder->smoothPathStringPulling(path);
-        auto world = gridToWorld(pulled);
-        if (world.size() >= 2) {
-            m_segs.append(m_finder->smoothPathCatmullRom(world, m_tension, splineRes));
-        }
-        else {
-            m_segs.append(world);
-        }
+    if (m_pfMode == PathfindingMode::Direct) data.pfMode = 0;
+    else if (m_pfMode == PathfindingMode::WaypointStrict) data.pfMode = 1;
+    else data.pfMode = 2;
+
+    data.tension = m_tension;
+    data.iter = m_iter;
+
+    QThread* thread = new QThread;
+    PathfindingWorker* worker = new PathfindingWorker(data);
+    worker->moveToThread(thread);
+
+    connect(thread, &QThread::started, worker, &PathfindingWorker::process);
+    connect(worker, &PathfindingWorker::progressChanged, this, &MapView::onPathfindingProgress);
+    connect(worker, &PathfindingWorker::finished, this, &MapView::onPathfindingFinished);
+
+    connect(worker, &PathfindingWorker::finished, thread, &QThread::quit);
+    connect(worker, &PathfindingWorker::finished, worker, &QObject::deleteLater);
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+
+    m_isFinding = true;
+    emit isFindingPathChanged();
+    thread->start();
+}
+
+void MapView::onPathfindingProgress(float p) {
+    m_progress = p;
+    emit searchProgressChanged();
+}
+
+void MapView::onPathfindingFinished(const QList<QList<QPointF>>& segments, bool failed, int failIdx, const QString& msg) {
+    m_isFinding = false;
+    emit isFindingPathChanged();
+
+    if (failed) {
+        m_pfFail = true;
+        m_failSegIdx = failIdx;
+        emit pathfindingFailed(msg);
     }
     else {
-        QList<QList<QPointF>> ctrlSegs;
-        QList<QPointF> allCtrl;
-
-        for (int i = 0; i < pts.size() - 1; ++i) {
-            QPoint s(pts[i].x() / m_res, pts[i].y() / m_res);
-            QPoint g(pts[i + 1].x() / m_res, pts[i + 1].y() / m_res);
-
-            int midx = i;
-            if (m_isLoop) midx = (i < m_wps.size()) ? i : m_wps.size() - 1;
-            else midx = i;
-
-            auto mode = m_wpModes.value(midx, PathMode::Safe);
-            auto path = m_finder->findPath(s, g, mode, m_safeThresh, m_edgeThresh, false);
-
-            if (path.isEmpty()) {
-                handleFail(i, m_isLoop);
-                return;
-            }
-
-            auto pulled = m_finder->smoothPathStringPulling(path);
-            auto world = gridToWorld(pulled);
-
-            if (world.size() < 2) {
-                world.clear();
-                world.append(pts[i]);
-                world.append(pts[i + 1]);
-            }
-
-            ctrlSegs.append(world);
-            if (allCtrl.isEmpty()) allCtrl.append(world);
-            else allCtrl.append(world.mid(1));
-        }
-
-        if (allCtrl.size() < 2) {
-            m_segs = ctrlSegs;
-            update();
-            return;
-        }
-
-        auto smooth = m_finder->smoothPathCatmullRom(allCtrl, m_tension, splineRes);
-
-        int startIdx = 0;
-        for (int i = 0; i < ctrlSegs.size(); ++i) {
-            int pairs = qMax(0, (int)ctrlSegs[i].size() - 1);
-            int ptsCount = pairs * splineRes;
-            int take = (startIdx == 0) ? ptsCount + 1 : ptsCount;
-
-            if (i == ctrlSegs.size() - 1) m_segs.append(smooth.mid(startIdx));
-            else m_segs.append(smooth.mid(startIdx, take));
-
-            startIdx += ptsCount;
-        }
-
-        if (m_isLoop) {
-            QList<QList<QPointF>> resampled;
-            double ds = qMax(1.0, (double)m_res);
-            for (const auto& s : m_segs) {
-                resampled.append(m_finder->resampleByArcLength(s, ds));
-            }
-            m_segs = resampled;
-        }
+        m_segs = segments;
     }
     update();
 }
@@ -1046,7 +1165,19 @@ QList<QList<QPointF>> MapView::getFoundPathSegments() const { return m_segs; }
 
 void MapView::regeneratePathfinderGrid() {
     if (m_finder) {
-        m_finder->generateConfigurationSpace(PathMode::Safe, m_safeThresh, m_edgeThresh);
+        Pathfinding::PathfinderConfig cfg;
+        cfg.mapW = m_mapW;
+        cfg.mapH = m_mapH;
+        cfg.resolution = m_res;
+        cfg.robotW = m_robotW;
+        cfg.robotH = m_robotH;
+        cfg.obstacles = m_obs;
+        cfg.mode = 0;
+        cfg.safeThresh = m_safeThresh;
+        cfg.edgeThresh = m_edgeThresh;
+
+        m_finder->setConfig(cfg);
+        m_finder->generateConfigurationSpace();
     }
 }
 

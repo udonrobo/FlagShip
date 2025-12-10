@@ -5,10 +5,31 @@
 #include <QPointF>
 #include <QList>
 #include <vector>
-#include "mapView.h" 
+#include <functional>
+#include <QRectF>
 
-class MapView;
 namespace Pathfinding {
+
+    // 経路探索に必要なデータをまとめた構造体
+    struct PathfinderConfig {
+        int mapW;
+        int mapH;
+        int resolution;
+        float robotW;
+        float robotH;
+        QList<QRectF> obstacles;
+        QList<QPointF> waypoints;
+
+        // パラメータ
+        int mode; // 0:Safe, 1:Aggressive
+        float safeThresh;
+        qreal edgeThresh;
+
+        // 探索制御
+        bool useWpField;
+        double detourFact = 1.6;
+        int detourMargin = 8;
+    };
 
     struct Node {
         QPoint pos;
@@ -31,13 +52,17 @@ namespace Pathfinding {
     class Pathfinder
     {
     public:
-        explicit Pathfinder(MapView* map);
+        explicit Pathfinder();
+
+        // セットアップ
+        void setConfig(const PathfinderConfig& config);
 
         // 経路探索
-        QList<QPoint> findPath(const QPoint& start, const QPoint& goal, MapView::PathMode mode, float safeThresh, qreal edgeThresh, bool useWpField);
+        // progressCallback: 0.0 ~ 1.0 の進捗を通知する関数
+        QList<QPoint> findPath(const QPoint& start, const QPoint& goal, std::function<void(float)> progressCallback = nullptr);
 
         // C-Space (障害物設定空間) の生成
-        void generateConfigurationSpace(MapView::PathMode mode, float safeThresh, qreal edgeThresh);
+        void generateConfigurationSpace();
 
         // ウェイポイント誘導場の生成
         void generateWaypointField();
@@ -53,9 +78,6 @@ namespace Pathfinding {
         QList<QPointF> smoothWorldPathStringPulling(const QList<QPointF>& worldPath) const;
         QList<QPointF> resampleByArcLength(const QList<QPointF>& pts, double ds) const;
 
-        void setDetourFactor(double f) { m_detourFact = f; }
-        void setDetourMarginCells(int m) { m_detourMargin = m; }
-
     private:
         // 安全距離場の生成
         void generateDistanceField();
@@ -65,7 +87,7 @@ namespace Pathfinding {
         bool isWorldPathCollisionFree(const QPointF& p1, const QPointF& p2) const;
         QPointF getCatmullRomPoint(float t, const QPointF& p0, const QPointF& p1, const QPointF& p2, const QPointF& p3, float alpha) const;
 
-        MapView* m_map;
+        PathfinderConfig m_cfg;
         int m_gridW = 0;
         int m_gridH = 0;
 
@@ -73,9 +95,6 @@ namespace Pathfinding {
         std::vector<std::vector<int>> m_grid;
         std::vector<std::vector<int>> m_distField;
         std::vector<std::vector<int>> m_wpField;
-
-        double m_detourFact = 1.6;   // 許容迂回係数
-        int    m_detourMargin = 8;   // マージン(セル数)
     };
 
 }
