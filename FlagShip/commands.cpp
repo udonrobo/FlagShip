@@ -12,7 +12,6 @@ AddObstacleCommand::AddObstacleCommand(MapView* map, const QRectF& obs, QUndoCom
 
 void AddObstacleCommand::undo()
 {
-    // 末尾に追加された障害物を削除
     m_map->m_obs.removeLast();
     m_map->regeneratePathfinderGrid();
     m_map->update();
@@ -20,7 +19,6 @@ void AddObstacleCommand::undo()
 
 void AddObstacleCommand::redo()
 {
-    // 障害物をリストに追加
     m_map->m_obs.append(m_obs);
     m_map->regeneratePathfinderGrid();
     m_map->update();
@@ -32,7 +30,6 @@ void AddObstacleCommand::redo()
 DeleteObstacleCommand::DeleteObstacleCommand(MapView* map, int idx, QUndoCommand* parent)
     : QUndoCommand(parent), m_map(map), m_idx(idx)
 {
-    // 削除対象を保存
     if (m_idx >= 0 && m_idx < m_map->m_obs.size()) {
         m_obs = m_map->m_obs.at(m_idx);
     }
@@ -41,7 +38,6 @@ DeleteObstacleCommand::DeleteObstacleCommand(MapView* map, int idx, QUndoCommand
 
 void DeleteObstacleCommand::undo()
 {
-    // 削除した障害物を元の位置に戻す
     if (m_idx >= 0 && m_idx <= m_map->m_obs.size()) {
         m_map->m_obs.insert(m_idx, m_obs);
         m_map->regeneratePathfinderGrid();
@@ -51,9 +47,35 @@ void DeleteObstacleCommand::undo()
 
 void DeleteObstacleCommand::redo()
 {
-    // 指定インデックスの障害物を削除
     if (m_idx >= 0 && m_idx < m_map->m_obs.size()) {
         m_map->m_obs.removeAt(m_idx);
+        m_map->regeneratePathfinderGrid();
+        m_map->update();
+    }
+}
+
+// ------------------------------------------------------------------
+// 障害物移動コマンド
+// ------------------------------------------------------------------
+MoveObstacleCommand::MoveObstacleCommand(MapView* map, int idx, const QRectF& oldRect, const QRectF& newRect, QUndoCommand* parent)
+    : QUndoCommand(parent), m_map(map), m_idx(idx), m_oldRect(oldRect), m_newRect(newRect)
+{
+    setText("move obstacle");
+}
+
+void MoveObstacleCommand::undo()
+{
+    if (m_idx >= 0 && m_idx < m_map->m_obs.size()) {
+        m_map->m_obs[m_idx] = m_oldRect;
+        m_map->regeneratePathfinderGrid();
+        m_map->update();
+    }
+}
+
+void MoveObstacleCommand::redo()
+{
+    if (m_idx >= 0 && m_idx < m_map->m_obs.size()) {
+        m_map->m_obs[m_idx] = m_newRect;
         m_map->regeneratePathfinderGrid();
         m_map->update();
     }
@@ -70,7 +92,6 @@ AddWaypointCommand::AddWaypointCommand(MapView* map, const QPointF& wp, QUndoCom
 
 void AddWaypointCommand::undo()
 {
-    // 末尾のウェイポイントとそのモード設定を削除
     m_map->m_wps.removeLast();
     m_map->m_wpModes.removeLast();
     m_map->update();
@@ -78,7 +99,6 @@ void AddWaypointCommand::undo()
 
 void AddWaypointCommand::redo()
 {
-    // ウェイポイントを追加し、デフォルトモード(Safe)を設定
     m_map->m_wps.append(m_wp);
     m_map->m_wpModes.append(MapView::PathMode::Safe);
     m_map->update();
@@ -90,7 +110,6 @@ void AddWaypointCommand::redo()
 DeleteWaypointCommand::DeleteWaypointCommand(MapView* map, int idx, QUndoCommand* parent)
     : QUndoCommand(parent), m_map(map), m_idx(idx)
 {
-    // 削除対象の座標とモードを保存
     if (m_idx >= 0 && m_idx < m_map->m_wps.size()) {
         m_wp = m_map->m_wps.at(m_idx);
         m_mode = m_map->m_wpModes.at(m_idx);
@@ -100,7 +119,6 @@ DeleteWaypointCommand::DeleteWaypointCommand(MapView* map, int idx, QUndoCommand
 
 void DeleteWaypointCommand::undo()
 {
-    // 削除した情報を復元
     if (m_idx >= 0 && m_idx <= m_map->m_wps.size()) {
         m_map->m_wps.insert(m_idx, m_wp);
         m_map->m_wpModes.insert(m_idx, m_mode);
@@ -110,10 +128,34 @@ void DeleteWaypointCommand::undo()
 
 void DeleteWaypointCommand::redo()
 {
-    // 指定インデックスのウェイポイント情報を削除
     if (m_idx >= 0 && m_idx < m_map->m_wps.size()) {
         m_map->m_wps.removeAt(m_idx);
         m_map->m_wpModes.removeAt(m_idx);
+        m_map->update();
+    }
+}
+
+// ------------------------------------------------------------------
+// ウェイポイント移動コマンド
+// ------------------------------------------------------------------
+MoveWaypointCommand::MoveWaypointCommand(MapView* map, int idx, const QPointF& oldPos, const QPointF& newPos, QUndoCommand* parent)
+    : QUndoCommand(parent), m_map(map), m_idx(idx), m_oldPos(oldPos), m_newPos(newPos)
+{
+    setText("move waypoint");
+}
+
+void MoveWaypointCommand::undo()
+{
+    if (m_idx >= 0 && m_idx < m_map->m_wps.size()) {
+        m_map->m_wps[m_idx] = m_oldPos;
+        m_map->update();
+    }
+}
+
+void MoveWaypointCommand::redo()
+{
+    if (m_idx >= 0 && m_idx < m_map->m_wps.size()) {
+        m_map->m_wps[m_idx] = m_newPos;
         m_map->update();
     }
 }

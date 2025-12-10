@@ -9,7 +9,6 @@
 #include <QLineF>
 
 namespace {
-    // ウェイポイントの配色リスト
     const QList<QColor> WP_COLORS = {
         QColor(230, 25, 75),   QColor(60, 180, 75),   QColor(0, 130, 200),
         QColor(255, 225, 25),  QColor(245, 130, 48),  QColor(145, 30, 180),
@@ -22,23 +21,19 @@ MapView::MapView(QQuickItem* parent) : QQuickPaintedItem(parent)
 {
     m_finder = std::make_unique<Pathfinding::Pathfinder>(this);
     m_undo = new QUndoStack(this);
-    // 初期化後のビュー調整
     QTimer::singleShot(0, this, &MapView::resetView);
 }
 
 MapView::~MapView() = default;
 
-// マップ全体矩形の取得ヘルパー
 static QRectF getMapRect(int w, int h, int res) {
     return QRectF(0, 0, w * res, h * res);
 }
 
-// 範囲外オブジェクトの削除
 void MapView::cullOutOfBoundsObjects() {
     QRectF bound = getMapRect(m_mapW, m_mapH, m_res);
     bool changed = false;
 
-    // ウェイポイント
     int oldWpCount = m_wps.count();
     for (int i = oldWpCount - 1; i >= 0; --i) {
         if (!bound.contains(m_wps[i])) {
@@ -52,7 +47,6 @@ void MapView::cullOutOfBoundsObjects() {
         qDebug() << "Culled" << oldWpCount - m_wps.count() << "waypoints.";
     }
 
-    // 障害物
     int oldObsCount = m_obs.count();
     QList<QRectF> validObs;
     for (const QRectF& o : m_obs) {
@@ -67,7 +61,6 @@ void MapView::cullOutOfBoundsObjects() {
     }
     m_obs = validObs;
 
-    // スタート・ゴール
     if (m_hasStart && !bound.contains(m_start)) {
         m_hasStart = false;
         changed = true;
@@ -83,7 +76,6 @@ void MapView::cullOutOfBoundsObjects() {
     }
 }
 
-// 寸法線の描画
 void MapView::drawDimLine(QPainter* p, const QPointF& p1, const QPointF& p2, bool horiz)
 {
     const qreal off = 15.0 / m_scale;
@@ -105,12 +97,10 @@ void MapView::paint(QPainter* p)
     QRectF bound = getMapRect(m_mapW, m_mapH, m_res);
     QRectF viewRect = QRectF(m_offset, QSizeF(width() / m_scale, height() / m_scale));
 
-    // 背景描画
     p->fillRect(bound, m_bgColor);
     p->setPen(QPen(Qt::white, 2.0 / m_scale));
     p->drawRect(bound);
 
-    // グリッド描画
     QPen penMin(m_gridColor, 1.0 / m_scale);
     QPen penMaj(m_gridColor.lighter(150), 1.5 / m_scale);
     if (m_res > 0) {
@@ -131,7 +121,6 @@ void MapView::paint(QPainter* p)
         }
     }
 
-    // 安全領域(C-Space)表示
     if (m_showSafeZone) {
         p->setPen(Qt::NoPen);
         p->setBrush(QColor(0, 100, 255, 40));
@@ -147,7 +136,6 @@ void MapView::paint(QPainter* p)
         }
     }
 
-    // 障害物
     if (!m_obs.isEmpty()) {
         QPainterPath path;
         for (const QRectF& r : m_obs) path.addRect(r);
@@ -156,14 +144,12 @@ void MapView::paint(QPainter* p)
         p->drawPath(path);
     }
 
-    // 選択中障害物
     if (m_selObsIdx != -1) {
         p->setPen(QPen(QColor(255, 255, 0, 220), 4.0 / m_scale));
         p->setBrush(Qt::NoBrush);
         p->drawRect(m_obs[m_selObsIdx]);
     }
 
-    // パス描画
     if (!m_segs.isEmpty() && !m_pfFail) {
         QPen pen(QColor(255, 165, 0), 3.0 / m_scale);
         p->setPen(pen);
@@ -177,7 +163,6 @@ void MapView::paint(QPainter* p)
         }
     }
     else {
-        // プレビュー線
         QList<QPointF> line;
         if (!m_isLoop) {
             if (m_hasStart) line.append(m_start);
@@ -199,7 +184,6 @@ void MapView::paint(QPainter* p)
         }
     }
 
-    // 探索失敗区間の強調
     if (m_pfFail && m_failSegIdx != -1) {
         QList<QPointF> pts;
         if (m_isLoop) {
@@ -217,7 +201,6 @@ void MapView::paint(QPainter* p)
         }
     }
 
-    // ウェイポイント
     const qreal rad = (m_res > 0 ? 0.6 * m_res : 3.0);
     QFont font = p->font();
     font.setBold(true);
@@ -244,7 +227,6 @@ void MapView::paint(QPainter* p)
         p->drawText(r, Qt::AlignCenter, QString::number(i));
     }
 
-    // ロボット表示用ラムダ
     auto drawBot = [&](const QPointF& c, const QColor& col) {
         QRectF r(0, 0, m_robotW, m_robotH);
         r.moveCenter(c);
@@ -253,12 +235,10 @@ void MapView::paint(QPainter* p)
         p->drawRect(r);
         };
 
-    // 配置モードプレビュー
     if (m_mode == EditMode::StartPlacement) drawBot(m_snapPos, QColor(60, 180, 75, 100));
     else if (m_mode == EditMode::GoalPlacement) drawBot(m_snapPos, QColor(230, 25, 75, 100));
     else if (m_mode == EditMode::LoopStartPlacement) drawBot(m_snapPos, QColor(0, 255, 255, 100));
 
-    // 配置済みポイント
     if (m_isLoop) {
         if (!m_wps.isEmpty()) drawBot(m_wps.first(), QColor(0, 255, 255, 100));
     }
@@ -267,15 +247,13 @@ void MapView::paint(QPainter* p)
         if (m_hasGoal) drawBot(m_goal, QColor(230, 25, 75, 100));
     }
 
-    // スナップガイド
-    if ((m_mode == EditMode::Waypoint || m_mode == EditMode::Obstacle || m_drawState == ObstacleDrawingState::Idle) && m_mouseIn) {
+    if ((m_mode == EditMode::Waypoint || m_mode == EditMode::Obstacle || m_drawState == ObstacleDrawingState::Idle || m_mode == EditMode::Move) && m_mouseIn) {
         p->setPen(Qt::NoPen);
         p->setBrush(QColor(255, 255, 255, 50));
         qreal r = m_res * 0.3;
         p->drawEllipse(m_snapPos, r, r);
     }
 
-    // 障害物作成中のプレビュー
     if (m_drawState == ObstacleDrawingState::Defining || m_drawState == ObstacleDrawingState::Confirming) {
         QColor base = (m_drawState == ObstacleDrawingState::Defining) ? Qt::gray : QColor(255, 100, 100);
         base.setAlphaF(m_previewAlpha);
@@ -290,7 +268,6 @@ void MapView::paint(QPainter* p)
         }
     }
 
-    // 中心十字
     {
         qreal cx = bound.width() / 2.0;
         qreal cy = bound.height() / 2.0;
@@ -301,7 +278,6 @@ void MapView::paint(QPainter* p)
 
     p->restore();
 
-    // デバッグテキスト
     p->setPen(Qt::white);
     p->setFont(QFont("Arial", 10));
     QString debug = QString("WPs: %1, Obs: %2, S: %3, G: %4, Loop: %5")
@@ -390,6 +366,7 @@ void MapView::handleMapClick(const QPointF& viewPos, bool ctrl) {
     case EditMode::StartPlacement:     handleLeftClickInStartPlacementMode(world); break;
     case EditMode::GoalPlacement:      handleLeftClickInGoalPlacementMode(world); break;
     case EditMode::LoopStartPlacement: handleLeftClickInLoopStartPlacementMode(world); break;
+    case EditMode::Move: break;
     }
 }
 
@@ -476,7 +453,6 @@ void MapView::handleLeftClickInEraseMode(const QPointF& world) {
     const qreal rad = (m_res > 0 ? 0.6 * m_res : 3.0);
     const qreal selRad = rad * 1.2;
 
-    // ウェイポイント削除試行
     for (int i = m_wps.count() - 1; i >= 0; --i) {
         QPointF d = m_wps[i] - world;
         if (QPointF::dotProduct(d, d) < (selRad * selRad)) {
@@ -485,7 +461,6 @@ void MapView::handleLeftClickInEraseMode(const QPointF& world) {
         }
     }
 
-    // 障害物削除試行
     const qreal margin = 5.0 / m_scale;
     for (int i = m_obs.count() - 1; i >= 0; --i) {
         QRectF hit = m_obs[i].adjusted(-margin, -margin, margin, margin);
@@ -630,7 +605,6 @@ void MapView::zoom(qreal factor, const QPointF& center) {
     emit dimensionPositionsChanged();
 }
 
-// プロパティアクセサ
 void MapView::setShowCenterCrosshair(bool show) {
     if (m_showCrosshair != show) {
         m_showCrosshair = show;
@@ -919,7 +893,6 @@ void MapView::handleLeftClickInLoopStartPlacementMode(const QPointF&) {
     update();
 }
 
-// 経路探索メイン
 void MapView::findPath()
 {
     m_pfFail = false;
@@ -927,7 +900,6 @@ void MapView::findPath()
     m_segs.clear();
     update();
 
-    // グリッド座標 -> ワールド座標変換
     auto gridToWorld = [&](const QList<QPoint>& gridPath) {
         QList<QPointF> world;
         if (m_res <= 0) return world;
@@ -937,7 +909,6 @@ void MapView::findPath()
         return world;
         };
 
-    // 失敗時処理
     auto handleFail = [&](int idx, bool loop) {
         m_pfFail = true;
         m_failSegIdx = idx;
@@ -951,7 +922,6 @@ void MapView::findPath()
     const int splineRes = 30;
     QList<QPointF> pts;
 
-    // 探索点リスト作成
     if (m_isLoop) {
         if (m_wps.count() < 2) {
             emit pathfindingFailed("Loop requires at least 2 waypoints.");
@@ -972,7 +942,6 @@ void MapView::findPath()
 
     if (pts.size() < 2) return;
 
-    // Directモード (単一セグメント)
     if (!m_isLoop && m_pfMode == PathfindingMode::Direct) {
         m_finder->generateWaypointField();
         QPoint sc(m_start.x() / m_res, m_start.y() / m_res);
@@ -994,7 +963,6 @@ void MapView::findPath()
         }
     }
     else {
-        // セグメント分割モード
         QList<QList<QPointF>> ctrlSegs;
         QList<QPointF> allCtrl;
 
@@ -1002,10 +970,9 @@ void MapView::findPath()
             QPoint s(pts[i].x() / m_res, pts[i].y() / m_res);
             QPoint g(pts[i + 1].x() / m_res, pts[i + 1].y() / m_res);
 
-            // モード決定
             int midx = i;
             if (m_isLoop) midx = (i < m_wps.size()) ? i : m_wps.size() - 1;
-            else midx = i; // 非ループ時はセグメントID=i
+            else midx = i;
 
             auto mode = m_wpModes.value(midx, PathMode::Safe);
             auto path = m_finder->findPath(s, g, mode, m_safeThresh, m_edgeThresh, false);
@@ -1035,10 +1002,8 @@ void MapView::findPath()
             return;
         }
 
-        // グローバル平滑化
         auto smooth = m_finder->smoothPathCatmullRom(allCtrl, m_tension, splineRes);
 
-        // セグメント再分割
         int startIdx = 0;
         for (int i = 0; i < ctrlSegs.size(); ++i) {
             int pairs = qMax(0, (int)ctrlSegs[i].size() - 1);
@@ -1051,7 +1016,6 @@ void MapView::findPath()
             startIdx += ptsCount;
         }
 
-        // ループ時のリサンプリング
         if (m_isLoop) {
             QList<QList<QPointF>> resampled;
             double ds = qMax(1.0, (double)m_res);
@@ -1083,3 +1047,82 @@ void MapView::regeneratePathfinderGrid() {
 
 void MapView::undo() { m_undo->undo(); }
 void MapView::redo() { m_undo->redo(); }
+
+void MapView::startMoving(const QPointF& viewPos)
+{
+    m_moveWpIdx = -1;
+    m_moveObsIdx = -1;
+
+    QPointF world = m_offset + (viewPos / m_scale);
+
+    const qreal rad = (m_res > 0 ? 0.6 * m_res : 3.0);
+    const qreal selRad = rad * 1.5;
+
+    for (int i = 0; i < m_wps.count(); ++i) {
+        QPointF d = m_wps[i] - world;
+        if (QPointF::dotProduct(d, d) < (selRad * selRad)) {
+            m_moveWpIdx = i;
+            m_moveStartPos = m_wps[i];
+            m_lastSnapPos = m_snapPos;
+            setSelectedWaypointIndex(i);
+            return;
+        }
+    }
+
+    const qreal margin = 5.0 / m_scale;
+    for (int i = m_obs.count() - 1; i >= 0; --i) {
+        QRectF hit = m_obs[i].adjusted(-margin, -margin, margin, margin);
+        if (hit.contains(world)) {
+            m_moveObsIdx = i;
+            m_moveStartRect = m_obs[i];
+            m_lastSnapPos = m_snapPos;
+            m_selObsIdx = i;
+            update();
+            return;
+        }
+    }
+}
+
+void MapView::updateMoving(const QPointF& viewPos)
+{
+    Q_UNUSED(viewPos);
+
+    if (m_moveWpIdx != -1) {
+        QPointF delta = m_snapPos - m_lastSnapPos;
+        if (delta.manhattanLength() > 0.001) {
+            m_wps[m_moveWpIdx] += delta;
+            m_lastSnapPos = m_snapPos;
+            m_segs.clear();
+            update();
+        }
+    }
+    else if (m_moveObsIdx != -1) {
+        QPointF delta = m_snapPos - m_lastSnapPos;
+        if (delta.manhattanLength() > 0.001) {
+            m_obs[m_moveObsIdx].translate(delta);
+            m_lastSnapPos = m_snapPos;
+            regeneratePathfinderGrid();
+            m_segs.clear();
+            update();
+        }
+    }
+}
+
+void MapView::finishMoving(const QPointF& viewPos)
+{
+    Q_UNUSED(viewPos);
+
+    if (m_moveWpIdx != -1) {
+        if (m_wps[m_moveWpIdx] != m_moveStartPos) {
+            m_undo->push(new MoveWaypointCommand(this, m_moveWpIdx, m_moveStartPos, m_wps[m_moveWpIdx]));
+        }
+    }
+    else if (m_moveObsIdx != -1) {
+        if (m_obs[m_moveObsIdx] != m_moveStartRect) {
+            m_undo->push(new MoveObstacleCommand(this, m_moveObsIdx, m_moveStartRect, m_obs[m_moveObsIdx]));
+        }
+    }
+
+    m_moveWpIdx = -1;
+    m_moveObsIdx = -1;
+}

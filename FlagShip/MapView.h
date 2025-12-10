@@ -12,25 +12,26 @@
 #include <QTimer>
 #include <QUndoStack>
 
-// 前方宣言
 namespace Pathfinding {
     class Pathfinder;
 }
 class AddObstacleCommand;
 class DeleteObstacleCommand;
+class MoveObstacleCommand;
 class AddWaypointCommand;
 class DeleteWaypointCommand;
+class MoveWaypointCommand;
 
 class MapView : public QQuickPaintedItem
 {
     Q_OBJECT
-        // コマンドクラスからメンバにアクセスできるようにする
         friend class AddObstacleCommand;
     friend class DeleteObstacleCommand;
+    friend class MoveObstacleCommand;
     friend class AddWaypointCommand;
     friend class DeleteWaypointCommand;
+    friend class MoveWaypointCommand;
 
-    // プロパティ定義 (QML連携用)
     Q_PROPERTY(QColor mapBackgroundColor READ mapBackgroundColor WRITE setMapBackgroundColor NOTIFY mapColorsChanged)
         Q_PROPERTY(QColor gridLineColor READ gridLineColor WRITE setGridLineColor NOTIFY mapColorsChanged)
         Q_PROPERTY(int resolution READ resolution WRITE setResolution NOTIFY resolutionChanged)
@@ -67,14 +68,12 @@ public:
     explicit MapView(QQuickItem* parent = nullptr);
     ~MapView();
 
-    // 経路モード (安全重視 / 攻め)
     enum class PathMode {
         Safe,
         Aggressive
     };
     Q_ENUM(PathMode)
 
-        // 探索アルゴリズムモード
         enum class PathfindingMode {
         Direct,
         WaypointStrict,
@@ -82,18 +81,17 @@ public:
     };
     Q_ENUM(PathfindingMode)
 
-        // 障害物描画ステート
         enum class ObstacleDrawingState {
         Idle,
         Defining,
-        Confirming // AwaitingConfirmation -> Confirming
+        Confirming
     };
 
-    // 編集モード
     enum class EditMode {
         Waypoint,
         Obstacle,
         Erase,
+        Move,
         StartPlacement,
         GoalPlacement,
         LoopStartPlacement
@@ -104,7 +102,6 @@ public:
 
         void paint(QPainter* painter) override;
 
-    // ゲッター・セッター群
     void setMapBackgroundColor(const QColor& color);
     QColor mapBackgroundColor() const;
     void setGridLineColor(const QColor& color);
@@ -170,7 +167,6 @@ public:
     void setLoopPath(bool loop);
 
 public slots:
-    // 操作系スロット
     void pan(qreal dx, qreal dy);
     void zoom(qreal factor, const QPointF& centerPos);
     void handleMapClick(const QPointF& viewPos, bool isCtrlPressed);
@@ -192,8 +188,12 @@ public slots:
     void confirmLoopModeActivation();
     void confirmNonLoopModeActivation();
 
+    // Moveモード用スロット
+    void startMoving(const QPointF& viewPos);
+    void updateMoving(const QPointF& viewPos);
+    void finishMoving(const QPointF& viewPos);
+
 signals:
-    // プロパティ変更通知
     void mapColorsChanged();
     void resolutionChanged();
     void mapSizeChanged();
@@ -222,7 +222,6 @@ signals:
     void requestNonLoopModeConfirmation();
 
 private:
-    // 内部ヘルパー
     void handleLeftClickInWaypointMode(const QPointF& worldPos, bool isCtrlPressed);
     void handleLeftClickInObstacleMode(const QPointF& worldPos, bool isCtrlPressed);
     void handleLeftClickInEraseMode(const QPointF& worldPos);
@@ -236,7 +235,6 @@ private:
     void regeneratePathfinderGrid();
     void clearPathItems();
 
-    // メンバ変数
     qreal m_scale = 1.0;
     QPointF m_offset = QPointF(0, 0);
     QList<QPointF> m_wps;
@@ -287,9 +285,15 @@ private:
     int m_guideStr = 0;
     bool m_isLoop = false;
 
-    // 探索失敗状態
     bool m_pfFail = false;
     int m_failSegIdx = -1;
+
+    // Moveモード用メンバ変数
+    int m_moveWpIdx = -1;
+    int m_moveObsIdx = -1;
+    QPointF m_moveStartPos;
+    QRectF m_moveStartRect;
+    QPointF m_lastSnapPos;
 };
 
 #endif // MAPVIEW_H

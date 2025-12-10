@@ -42,6 +42,24 @@ private:
 };
 
 // ------------------------------------------------------------------
+// 障害物移動コマンド
+// ------------------------------------------------------------------
+class MoveObstacleCommand : public QUndoCommand
+{
+public:
+    explicit MoveObstacleCommand(MapView* map, int idx, const QRectF& oldRect, const QRectF& newRect, QUndoCommand* parent = nullptr);
+
+    void undo() override;
+    void redo() override;
+
+private:
+    MapView* m_map;
+    int m_idx;
+    QRectF m_oldRect;
+    QRectF m_newRect;
+};
+
+// ------------------------------------------------------------------
 // ウェイポイント追加コマンド
 // ------------------------------------------------------------------
 class AddWaypointCommand : public QUndoCommand
@@ -73,6 +91,24 @@ private:
     QPointF m_wp;
     MapView::PathMode m_mode;
     int m_idx;
+};
+
+// ------------------------------------------------------------------
+// ウェイポイント移動コマンド
+// ------------------------------------------------------------------
+class MoveWaypointCommand : public QUndoCommand
+{
+public:
+    explicit MoveWaypointCommand(MapView* map, int idx, const QPointF& oldPos, const QPointF& newPos, QUndoCommand* parent = nullptr);
+
+    void undo() override;
+    void redo() override;
+
+private:
+    MapView* m_map;
+    int m_idx;
+    QPointF m_oldPos;
+    QPointF m_newPos;
 };
 
 #endif // COMMANDS_H

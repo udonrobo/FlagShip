@@ -12,10 +12,8 @@ ApplicationWindow {
     minimumHeight: 600
     title: qsTr("FlagShip")
 
-    // 背景色 (ThemeController参照)
     background: Rectangle { color: theme.winBg }
 
-    // ヘッダー
     header: Rectangle {
         height: 50
         color: theme.headerBg
@@ -34,31 +32,27 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 5
 
-        // --- マップ描画エリア ---
         MapView {
             id: map
             objectName: "mapViewItem"
             Layout.fillWidth: true
             Layout.fillHeight: true
             
-            // 色設定
             mapBackgroundColor: theme.mapBg
             gridLineColor: theme.gridCol
             
-            // パラメータバインディング
             resolution: parseInt(inpRes.text)
             mapWidth: parseInt(inpMapW.text)
             mapHeight: parseInt(inpMapH.text)
             showCenterCrosshair: swCross.checked
             showSafetyZone: swSafe.checked
             
-            // 編集モード切り替え
             editMode: btnModeWp.checked ? MapView.Waypoint : 
-                      btnModeObs.checked ? MapView.Obstacle : MapView.Erase
+                      btnModeObs.checked ? MapView.Obstacle : 
+                      btnModeMove.checked ? MapView.Move : MapView.Erase
 
             focus: true
             
-            // キー操作 (Enter:確定, Esc:キャンセル, Del:削除, Ctrl+Z:Undo)
             Keys.onPressed: (event) => {
                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                     if (!inpObsW.activeFocus && !inpObsH.activeFocus) {
@@ -86,25 +80,25 @@ ApplicationWindow {
                 inpObsW.forceActiveFocus();
             }
 
-            // 障害物プレビュー時の点滅アニメ
             SequentialAnimation {
                 loops: Animation.Infinite
                 running: map.obstacleDrawingState === MapView.Confirming
                 NumberAnimation {
                     target: map
                     property: "previewOpacity"
-                    from: 1.0; to: 0.4; duration: 700
+                    from: 1.0;
+                    to: 0.4; duration: 700
                     easing.type: Easing.InOutQuad
                 }
                 NumberAnimation {
                     target: map
                     property: "previewOpacity"
-                    from: 0.4; to: 1.0; duration: 700
+                    from: 0.4;
+                    to: 1.0; duration: 700
                     easing.type: Easing.InOutQuad
                 }
             }
 
-            // マウス操作 (右/中ドラッグ:パン, ホイール:ズーム, 左:配置)
             MouseArea {
                 anchors.fill: parent
                 acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
@@ -117,19 +111,41 @@ ApplicationWindow {
                         const dy = mouse.y - pressPos.y;
                         map.pan(-dx, -dy);
                     }
+                    
                     map.updateMousePosition(Qt.point(mouse.x, mouse.y));
+                    
+                    if (mouse.buttons & Qt.LeftButton) {
+                         if (map.editMode === MapView.Move) {
+                             map.updateMoving(Qt.point(mouse.x, mouse.y));
+                         }
+                    }
+                    
                     pressPos = Qt.point(mouse.x, mouse.y);
                 }
                 
                 onEntered: map.updateMousePosition(Qt.point(mouseX, mouseY))
                 onExited: map.mouseExited()
-                onPressed: (mouse) => pressPos = Qt.point(mouse.x, mouse.y)
+                
+                onPressed: (mouse) => {
+                    pressPos = Qt.point(mouse.x, mouse.y)
+                    if (mouse.button === Qt.LeftButton) {
+                        if (map.editMode === MapView.Move) {
+                            map.startMoving(Qt.point(mouse.x, mouse.y));
+                        }
+                    }
+                }
 
                 onReleased: (mouse) => {
-                    const d = Qt.point(mouse.x - pressPos.x, mouse.y - pressPos.y);
-                    if (mouse.button === Qt.LeftButton && (d.x*d.x + d.y*d.y < 25)) {
-                        map.handleMapClick(Qt.point(mouse.x, mouse.y), !!(mouse.modifiers & Qt.ControlModifier));
-                        map.forceActiveFocus();
+                    if (mouse.button === Qt.LeftButton) {
+                        if (map.editMode === MapView.Move) {
+                            map.finishMoving(Qt.point(mouse.x, mouse.y));
+                        } else {
+                            const d = Qt.point(mouse.x - pressPos.x, mouse.y - pressPos.y);
+                            if (d.x*d.x + d.y*d.y < 25) {
+                                map.handleMapClick(Qt.point(mouse.x, mouse.y), !!(mouse.modifiers & Qt.ControlModifier));
+                                map.forceActiveFocus();
+                            }
+                        }
                     }
                 }
 
@@ -139,7 +155,6 @@ ApplicationWindow {
                 }
             }
 
-            // エラー通知
             Connections {
                 target: map
                 function onPathfindingFailed(reason) {
@@ -154,7 +169,6 @@ ApplicationWindow {
                 }
             }
 
-            // 障害物サイズ入力 (幅)
             TextField {
                 id: inpObsW
                 visible: map.dimensionInputsVisible
@@ -180,7 +194,6 @@ ApplicationWindow {
                 }
             }
 
-            // 障害物サイズ入力 (高さ)
             TextField {
                 id: inpObsH
                 visible: map.dimensionInputsVisible
@@ -206,36 +219,41 @@ ApplicationWindow {
                 }
             }
             
-            // ビュー操作ボタン群
             Button {
                 id: btnReset
                 text: qsTr("Reset View")
-                anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 10
+                anchors.left: parent.left;
+                anchors.top: parent.top; anchors.margins: 10
                 onClicked: map.resetView()
                 background: Rectangle {
                     color: parent.pressed ? Qt.darker(theme.btnSecBg) : theme.btnSecBg
                     radius: 5
                 }
                 contentItem: Text {
-                    text: parent.text; color: theme.btnTextCol
+                    text: parent.text;
+                    color: theme.btnTextCol
                     font: parent.font
-                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignHCenter;
+                    verticalAlignment: Text.AlignVCenter
                 }
             }
 
             Button {
                 id: btnClear
                 text: qsTr("Clear All")
-                anchors.left: parent.left; anchors.top: btnReset.bottom; anchors.margins: 10
+                anchors.left: parent.left;
+                anchors.top: btnReset.bottom; anchors.margins: 10
                 onClicked: map.clearWaypoints()
                 background: Rectangle {
                     color: parent.pressed ? Qt.darker(theme.btnSecBg) : theme.btnSecBg
                     radius: 5
                 }
                 contentItem: Text {
-                    text: parent.text; color: theme.btnTextCol
+                    text: parent.text;
+                    color: theme.btnTextCol
                     font: parent.font
-                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignHCenter;
+                    verticalAlignment: Text.AlignVCenter
                 }
             }
 
@@ -243,7 +261,8 @@ ApplicationWindow {
                 id: btnGen
                 text: qsTr("Generate .hpp")
                 font.bold: true
-                anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 10
+                anchors.right: parent.right; anchors.bottom: parent.bottom;
+                anchors.margins: 10
                 onClicked: backend.generateHppFile(
                     inpSpd.text, inpAng.text, inpRes.text, inpMapW.text, inpMapH.text
                 )
@@ -252,15 +271,16 @@ ApplicationWindow {
                     radius: 5
                 }
                 contentItem: Text {
-                    text: parent.text; color: theme.btnTextCol
+                    text: parent.text;
+                    color: theme.btnTextCol
                     font: parent.font
-                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignHCenter;
+                    verticalAlignment: Text.AlignVCenter
                 }
                 highlighted: true
             }
         }
 
-        // --- 操作パネル ---
         Rectangle {
             id: panel
             color: theme.panelBg
@@ -282,7 +302,7 @@ ApplicationWindow {
                      
                     RowLayout {
                         Label { 
-                            text: qsTr("Parameters"); 
+                            text: qsTr("Parameters");
                             color: theme.textCol
                             font { pixelSize: 18; bold: true }
                         }
@@ -295,7 +315,6 @@ ApplicationWindow {
                     
                     Rectangle { height: 1; color: theme.inpBorder; Layout.fillWidth: true; Layout.topMargin: 5; Layout.bottomMargin: 10 }
 
-                    // --- アルゴリズム設定 ---
                     Label { text: qsTr("Pathfinding Mode"); color: theme.textCol; font.pixelSize: 16; }
                     ComboBox {
                         id: cmbAlgo
@@ -318,7 +337,8 @@ ApplicationWindow {
                         onCheckedChanged: map.loopPath = checked
                         Layout.topMargin: 5
                         contentItem: Text {
-                            text: parent.text; font: parent.font; color: theme.textCol
+                            text: parent.text;
+                            font: parent.font; color: theme.textCol
                             verticalAlignment: Text.AlignVCenter
                             leftPadding: parent.indicator.width + parent.spacing
                         }
@@ -326,7 +346,6 @@ ApplicationWindow {
 
                     Rectangle { height: 1; color: theme.inpBorder; Layout.fillWidth: true; Layout.topMargin: 10; Layout.bottomMargin: 5 }
 
-                    // --- 表示・編集設定 ---
                     Label { text: qsTr("Display & Edit"); color: theme.textCol; font.pixelSize: 16; }
                     ColumnLayout {
                         Switch {
@@ -343,24 +362,38 @@ ApplicationWindow {
                     }
 
                     GridLayout {
-                        columns: 3
+                        columns: 2
                         ToolButton {
                             id: btnModeWp
                             text: qsTr("Waypoint")
                             checkable: true; checked: true
-                            onClicked: { if(checked) { btnModeObs.checked = false; btnModeErase.checked = false; } else checked = true }
+                            onClicked: { 
+                                if(checked) { btnModeObs.checked = false; btnModeErase.checked = false; btnModeMove.checked = false; } else checked = true 
+                            }
                         }
                         ToolButton {
                             id: btnModeObs
                             text: qsTr("Obstacle")
                             checkable: true
-                            onClicked: { if(checked) { btnModeWp.checked = false; btnModeErase.checked = false; } else checked = true }
+                            onClicked: { 
+                                if(checked) { btnModeWp.checked = false; btnModeErase.checked = false; btnModeMove.checked = false; } else checked = true 
+                            }
+                        }
+                        ToolButton {
+                            id: btnModeMove
+                            text: qsTr("Move")
+                            checkable: true
+                            onClicked: { 
+                                if(checked) { btnModeWp.checked = false; btnModeObs.checked = false; btnModeErase.checked = false; } else checked = true 
+                            }
                         }
                         ToolButton {
                             id: btnModeErase
                             text: qsTr("Eraser")
                             checkable: true
-                            onClicked: { if(checked) { btnModeWp.checked = false; btnModeObs.checked = false; } else checked = true }
+                            onClicked: { 
+                                if(checked) { btnModeWp.checked = false; btnModeObs.checked = false; btnModeMove.checked = false; } else checked = true 
+                            }
                         }
                     }
                    
@@ -388,7 +421,6 @@ ApplicationWindow {
 
                     Rectangle { height: 1; color: theme.inpBorder; Layout.fillWidth: true; Layout.topMargin: 10; Layout.bottomMargin: 5 }
 
-                    // --- ロボット・経路パラメータ ---
                     Label { text: qsTr("Robot & Path Parameters"); color: theme.textCol; font.pixelSize: 16; }
                     
                     ColumnLayout {
@@ -482,7 +514,6 @@ ApplicationWindow {
 
                     Rectangle { height: 1; color: theme.inpBorder; Layout.fillWidth: true; Layout.topMargin: 10; Layout.bottomMargin: 5 }
                     
-                    // --- マップ設定 ---
                     Label { text: qsTr("Map Parameters"); color: theme.textCol; font.pixelSize: 16; }
                     
                     Label { text: qsTr("Map Resolution (mm/cell)"); color: theme.textCol; font.pixelSize: 14; Layout.topMargin: 5 }
@@ -564,7 +595,6 @@ ApplicationWindow {
                     
                     Item { Layout.fillHeight: true }
 
-                    // 名前空間入力
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 8
@@ -589,7 +619,6 @@ ApplicationWindow {
         }
     }
 
-    // エラー表示ポップアップ
     Popup {
         id: popErr
         y: root.height - (height + 20)
@@ -627,7 +656,6 @@ ApplicationWindow {
         }
     }
 
-    // ループモード確認ダイアログ
     Dialog {
         id: dlgLoop
         title: qsTr("Confirm Loop Mode")
@@ -641,10 +669,9 @@ ApplicationWindow {
             padding: 10
         }
         onAccepted: map.confirmLoopModeActivation();
-        onRejected: {} // キャンセル時は何もしない (C++側でCheckBoxは戻る)
+        onRejected: {} 
     }
 
-    // 非ループモード確認ダイアログ
     Dialog {
         id: dlgNonLoop
         title: qsTr("Confirm Non-Loop Mode")
