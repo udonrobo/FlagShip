@@ -12,6 +12,7 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#include <QRegularExpression>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -33,12 +34,10 @@ void Backend::generateHppFile(const QString& speedStr, const QString& angleStr,
         return;
     }
 
-    // 名前空間とファイル名幹
     const QString rawNs = m_namespaceName;
     const QString ns = Backend::sanitizeNamespace(rawNs);
     const QString stem = Backend::sanitizeFileStem(rawNs);
 
-    // 保存先選択
     const QString defPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     QWidget* window = QApplication::activeWindow();
     const QString path = QFileDialog::getSaveFileName(
@@ -62,7 +61,6 @@ void Backend::generateHppFile(const QString& speedStr, const QString& angleStr,
     out.setCodec("UTF-8");
 #endif
 
-    // データ取得
     const auto wps = m_mapView->getWaypoints();
     const auto modes = m_mapView->getWaypointModes();
     const auto obs = m_mapView->getObstacles();
@@ -75,20 +73,18 @@ void Backend::generateHppFile(const QString& speedStr, const QString& angleStr,
     const int mapW = m_mapView->mapWidth();
     const int mapH = m_mapView->mapHeight();
 
-    // デフォルト値設定
     bool okV = false, okA = false;
     float defSpeed = speedStr.toFloat(&okV);
     float defAngle = angleStr.toFloat(&okA);
     if (!okV) defSpeed = 0.0f;
     if (!okA) defAngle = 0.0f;
 
-    // ヘッダ書き出し
     out << "#pragma once\n";
+    out << "// ファイル内に致命的な変更を加えないでください。ソフトがファイルをロードできなくなる可能性があります。\n\n";
     out << "#include \"PathTypes.hpp\"\n";
     out << "#include <cstddef>\n\n";
     out << "namespace " << ns << " {\n\n";
 
-    // 生成パラメータ
     QString modeStr;
     switch (pfMode) {
     case MapView::PathfindingMode::Direct:         modeStr = "Direct"; break;
@@ -103,7 +99,19 @@ void Backend::generateHppFile(const QString& speedStr, const QString& angleStr,
     out << "inline constexpr float robotW = " << QString::number(rWidth / 1000.0, 'f', 4) << "f;\n";
     out << "inline constexpr float robotH = " << QString::number(rHeight / 1000.0, 'f', 4) << "f;\n\n";
 
-    // ウェイポイント情報
+    out << "// スタート・ゴール (m)\n";
+    if (m_mapView->hasStartPoint()) {
+        QPointF s = m_mapView->getStartPoint();
+        out << "const float startPos[2] = { " << QString::number(s.x() / 1000.0, 'f', 4) << "f, "
+            << QString::number(s.y() / 1000.0, 'f', 4) << "f };\n";
+    }
+    if (m_mapView->hasGoalPoint()) {
+        QPointF g = m_mapView->getGoalPoint();
+        out << "const float goalPos[2] = { " << QString::number(g.x() / 1000.0, 'f', 4) << "f, "
+            << QString::number(g.y() / 1000.0, 'f', 4) << "f };\n";
+    }
+    out << "\n";
+
     out << "// 経路モード (0=Safe, 1=Aggressive)\n";
     out << "const size_t modeCount = " << modes.size() << ";\n";
     out << "const int wpModes[modeCount] = {";
@@ -125,8 +133,6 @@ void Backend::generateHppFile(const QString& speedStr, const QString& angleStr,
     }
     out << "};\n\n";
 
-    // 経路データ (m)
-    out << "// 生成経路 (セグメント分割)\n";
     for (int s = 0; s < segs.size(); ++s) {
         const auto& seg = segs[s];
         bool isLast = (s == segs.size() - 1);
@@ -137,7 +143,6 @@ void Backend::generateHppFile(const QString& speedStr, const QString& angleStr,
 
             float angle = defAngle;
             if (j + 1 < seg.size()) {
-                // 次点への角度計算 (北=0, 東=90)
                 const QPointF& p1 = seg[j];
                 const QPointF& p2 = seg[j + 1];
                 double dx = p2.x() - p1.x();
@@ -151,7 +156,6 @@ void Backend::generateHppFile(const QString& speedStr, const QString& angleStr,
                 << QString::number(angle, 'f', 2) << "f, "
                 << "0.06f";
 
-            // 終端セグメントの重み付け処理
             if (isLast) {
                 float weight = 0.0f;
                 if (seg.size() > 1) {
@@ -169,7 +173,6 @@ void Backend::generateHppFile(const QString& speedStr, const QString& angleStr,
         out << "};\n\n";
     }
 
-    // セグメント管理配列
     out << "// セグメント検索用\n";
     out << "static const size_t segTotal = " << segs.size() << ";\n\n";
 
@@ -187,14 +190,6 @@ void Backend::generateHppFile(const QString& speedStr, const QString& angleStr,
     }
     out << "};\n\n";
 
-    out << "// 公開インスタンス\n";
-    out << "inline const PathDefinition path = {\n";
-    out << "    segTotal,\n";
-    out << "    segCounts,\n";
-    out << "    segments\n";
-    out << "};\n\n";
-
-    // 障害物・マップ情報
     out << "// 障害物 [x, y, w, h] (m)\n";
     out << "const size_t obsCount = " << obs.size() << ";\n";
     out << "const float obs[obsCount][4] = {\n";
@@ -219,6 +214,140 @@ void Backend::generateHppFile(const QString& speedStr, const QString& angleStr,
     out << "const float defAngle = " << QString::number(defAngle, 'f', 1) << "f;\n\n";
 
     out << "} // namespace " << ns << "\n";
+}
+
+void Backend::loadHppFile()
+{
+    if (!m_mapView) return;
+
+    QWidget* window = QApplication::activeWindow();
+    const QString defPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    const QString path = QFileDialog::getOpenFileName(
+        window,
+        "Load Path Data",
+        defPath,
+        "C++ Header File (*.hpp);;All Files (*)"
+    );
+    if (path.isEmpty()) return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::critical(window, "Error", "Cannot open file for reading.");
+        return;
+    }
+
+    QTextStream in(&file);
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+    in.setEncoding(QStringConverter::Utf8);
+#else
+    in.setCodec("UTF-8");
+#endif
+    QString content = in.readAll();
+
+    QRegularExpression reRes("const float mapRes = ([0-9.]+)f;");
+    QRegularExpression reW("const int mapW = ([0-9]+);");
+    QRegularExpression reH("const int mapH = ([0-9]+);");
+    QRegularExpression reRobW("inline constexpr float robotW = ([0-9.]+)f;");
+    QRegularExpression reRobH("inline constexpr float robotH = ([0-9.]+)f;");
+    QRegularExpression reIter("const int smoothIter = ([0-9]+);");
+    QRegularExpression reMode("const char\\* const searchMode = \"([^\"]+)\";");
+    QRegularExpression reDefAng("const float defAngle = ([0-9.-]+)f;");
+
+    QRegularExpression reStart("const float startPos\\[2\\] = \\{ ([0-9.-]+)f, ([0-9.-]+)f \\};");
+    QRegularExpression reGoal("const float goalPos\\[2\\] = \\{ ([0-9.-]+)f, ([0-9.-]+)f \\};");
+
+    float mapRes = 0.01f;
+    int mapW = 150;
+    int mapH = 150;
+    float robotW = 0.1f;
+    float robotH = 0.1f;
+    int smoothIter = 3;
+    QString searchMode = "Waypoint-Strict";
+    float defAngle = 90.0f;
+
+    bool hasStart = false;
+    QPointF startPos;
+    bool hasGoal = false;
+    QPointF goalPos;
+
+    auto match = reRes.match(content);
+    if (match.hasMatch()) mapRes = match.captured(1).toFloat();
+    match = reW.match(content);
+    if (match.hasMatch()) mapW = match.captured(1).toInt();
+    match = reH.match(content);
+    if (match.hasMatch()) mapH = match.captured(1).toInt();
+    match = reRobW.match(content);
+    if (match.hasMatch()) robotW = match.captured(1).toFloat();
+    match = reRobH.match(content);
+    if (match.hasMatch()) robotH = match.captured(1).toFloat();
+    match = reIter.match(content);
+    if (match.hasMatch()) smoothIter = match.captured(1).toInt();
+    match = reMode.match(content);
+    if (match.hasMatch()) searchMode = match.captured(1);
+    match = reDefAng.match(content);
+    if (match.hasMatch()) defAngle = match.captured(1).toFloat();
+
+    match = reStart.match(content);
+    if (match.hasMatch()) {
+        hasStart = true;
+        startPos = QPointF(match.captured(1).toFloat() * 1000.0f, match.captured(2).toFloat() * 1000.0f);
+    }
+
+    match = reGoal.match(content);
+    if (match.hasMatch()) {
+        hasGoal = true;
+        goalPos = QPointF(match.captured(1).toFloat() * 1000.0f, match.captured(2).toFloat() * 1000.0f);
+    }
+
+    QList<int> wpModes;
+    QRegularExpression reWpModes("const int wpModes\\[.*?\\] = \\{(.*?)\\};", QRegularExpression::DotMatchesEverythingOption);
+    match = reWpModes.match(content);
+    if (match.hasMatch()) {
+        QStringList parts = match.captured(1).split(',');
+        for (const QString& p : parts) {
+            wpModes.append(p.trimmed().toInt());
+        }
+    }
+
+    QList<QPointF> wps;
+    QRegularExpression reWps("const PointControlData wps\\[.*?\\] = \\{(.*?)\\};", QRegularExpression::DotMatchesEverythingOption);
+    match = reWps.match(content);
+    if (match.hasMatch()) {
+        QString inner = match.captured(1);
+        QRegularExpression rePt("\\{\\s*([0-9.-]+)f,\\s*([0-9.-]+)f,");
+        auto it = rePt.globalMatch(inner);
+        while (it.hasNext()) {
+            auto m = it.next();
+            float x = m.captured(1).toFloat() * 1000.0f;
+            float y = m.captured(2).toFloat() * 1000.0f;
+            wps.append(QPointF(x, y));
+        }
+    }
+
+    QList<QRectF> obs;
+    QRegularExpression reObs("const float obs\\[.*?\\] = \\{(.*?)\\};", QRegularExpression::DotMatchesEverythingOption);
+    match = reObs.match(content);
+    if (match.hasMatch()) {
+        QString inner = match.captured(1);
+        QRegularExpression reRect("\\{\\s*([0-9.-]+)f,\\s*([0-9.-]+)f,\\s*([0-9.-]+)f,\\s*([0-9.-]+)f\\s*\\}");
+        auto it = reRect.globalMatch(inner);
+        while (it.hasNext()) {
+            auto m = it.next();
+            float x = m.captured(1).toFloat() * 1000.0f;
+            float y = m.captured(2).toFloat() * 1000.0f;
+            float w = m.captured(3).toFloat() * 1000.0f;
+            float h = m.captured(4).toFloat() * 1000.0f;
+            obs.append(QRectF(x, y, w, h));
+        }
+    }
+
+    m_mapView->loadMapData(
+        (int)(mapRes * 1000.0f), mapW, mapH,
+        robotW * 1000.0f, robotH * 1000.0f,
+        smoothIter, searchMode,
+        wps, wpModes, obs, defAngle,
+        hasStart, startPos, hasGoal, goalPos
+    );
 }
 
 QString Backend::sanitizeNamespace(const QString& str) {

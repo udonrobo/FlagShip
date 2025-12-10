@@ -38,6 +38,9 @@ public slots:
         const QString& resStr, const QString& wStr,
         const QString& hStr);
 
+    // ヘッダファイル読み込み処理
+    void loadHppFile();
+
 signals:
     void namespaceNameChanged();
 

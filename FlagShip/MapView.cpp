@@ -662,6 +662,11 @@ QList<QPointF> MapView::getWaypoints() const { return m_wps; }
 QList<MapView::PathMode> MapView::getWaypointModes() const { return m_wpModes; }
 QList<QRectF> MapView::getObstacles() const { return m_obs; }
 
+QPointF MapView::getStartPoint() const { return m_start; }
+bool MapView::hasStartPoint() const { return m_hasStart; }
+QPointF MapView::getGoalPoint() const { return m_goal; }
+bool MapView::hasGoalPoint() const { return m_hasGoal; }
+
 void MapView::setMapBackgroundColor(const QColor& c) {
     if (m_bgColor != c) {
         m_bgColor = c;
@@ -1125,4 +1130,53 @@ void MapView::finishMoving(const QPointF& viewPos)
 
     m_moveWpIdx = -1;
     m_moveObsIdx = -1;
+}
+
+void MapView::loadMapData(int res, int w, int h, float robotW, float robotH,
+    int smoothIter, const QString& searchMode,
+    const QList<QPointF>& wps, const QList<int>& wpModes,
+    const QList<QRectF>& obs, float defAngle,
+    bool hasStart, const QPointF& startPos,
+    bool hasGoal, const QPointF& goalPos)
+{
+    m_undo->clear();
+    clearWaypoints();
+
+    m_res = res;
+    m_mapW = w;
+    m_mapH = h;
+    m_robotW = robotW;
+    m_robotH = robotH;
+    m_iter = smoothIter;
+    m_robotAng = defAngle;
+
+    if (searchMode == "Direct") m_pfMode = PathfindingMode::Direct;
+    else if (searchMode == "Waypoint-Strict") m_pfMode = PathfindingMode::WaypointStrict;
+    else m_pfMode = PathfindingMode::WaypointGuided;
+
+    m_wps = wps;
+
+    m_wpModes.clear();
+    for (int m : wpModes) {
+        m_wpModes.append(m == 0 ? PathMode::Safe : PathMode::Aggressive);
+    }
+
+    m_obs = obs;
+
+    m_hasStart = hasStart;
+    if (m_hasStart) m_start = startPos;
+
+    m_hasGoal = hasGoal;
+    if (m_hasGoal) m_goal = goalPos;
+
+    emit resolutionChanged();
+    emit mapSizeChanged();
+    emit robotSizeChanged();
+    emit robotAngleChanged();
+    emit smoothingIterationsChanged();
+    emit pathfindingModeChanged();
+
+    regeneratePathfinderGrid();
+    update();
+    resetView();
 }

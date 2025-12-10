@@ -113,6 +113,12 @@ public:
     QList<QPointF> getFoundPath() const;
     QList<QList<QPointF>> getFoundPathSegments() const;
 
+    // スタート・ゴール取得用
+    QPointF getStartPoint() const;
+    bool hasStartPoint() const;
+    QPointF getGoalPoint() const;
+    bool hasGoalPoint() const;
+
     void setResolution(int r);
     int resolution() const;
     void setMapWidth(int w);
@@ -166,6 +172,14 @@ public:
     bool loopPath() const;
     void setLoopPath(bool loop);
 
+    // データロード用メソッド (start/goal引数を追加)
+    void loadMapData(int res, int w, int h, float robotW, float robotH,
+        int smoothIter, const QString& searchMode,
+        const QList<QPointF>& wps, const QList<int>& wpModes,
+        const QList<QRectF>& obs, float defAngle,
+        bool hasStart, const QPointF& startPos,
+        bool hasGoal, const QPointF& goalPos);
+
 public slots:
     void pan(qreal dx, qreal dy);
     void zoom(qreal factor, const QPointF& centerPos);
@@ -188,7 +202,6 @@ public slots:
     void confirmLoopModeActivation();
     void confirmNonLoopModeActivation();
 
-    // Moveモード用スロット
     void startMoving(const QPointF& viewPos);
     void updateMoving(const QPointF& viewPos);
     void finishMoving(const QPointF& viewPos);
@@ -288,7 +301,6 @@ private:
     bool m_pfFail = false;
     int m_failSegIdx = -1;
 
-    // Moveモード用メンバ変数
     int m_moveWpIdx = -1;
     int m_moveObsIdx = -1;
     QPointF m_moveStartPos;

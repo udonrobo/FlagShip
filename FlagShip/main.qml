@@ -258,6 +258,25 @@ ApplicationWindow {
             }
 
             Button {
+                id: btnLoad
+                text: qsTr("Load .hpp")
+                anchors.left: parent.left;
+                anchors.top: btnClear.bottom; anchors.margins: 10
+                onClicked: backend.loadHppFile()
+                background: Rectangle {
+                    color: parent.pressed ? Qt.darker(theme.btnSecBg) : theme.btnSecBg
+                    radius: 5
+                }
+                contentItem: Text {
+                    text: parent.text;
+                    color: theme.btnTextCol
+                    font: parent.font
+                    horizontalAlignment: Text.AlignHCenter;
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
+            Button {
                 id: btnGen
                 text: qsTr("Generate .hpp")
                 font.bold: true
@@ -617,74 +636,5 @@ ApplicationWindow {
                 }
             }
         }
-    }
-
-    Popup {
-        id: popErr
-        y: root.height - (height + 20)
-        x: (root.width - width) / 2
-        width: 400
-        height: errTxt.implicitHeight + 20
-        modal: false
-        dim: false
-        closePolicy: Popup.CloseOnEscape
-
-        property var autoClose: Timer {
-            interval: 4000
-            onTriggered: popErr.close()
-        }
-        onOpened: autoClose.start()
-        onClosed: autoClose.stop()
-
-        property alias text: errTxt.text
-
-        background: Rectangle {
-            color: "#D32F2F"
-            radius: 8
-            border.color: Qt.darker("#D32F2F"); border.width: 1
-        }
-
-        contentItem: Text {
-            id: errTxt
-            text: "Error"
-            color: "white"
-            font.bold: true
-            wrapMode: Text.WordWrap
-            padding: 10
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-        }
-    }
-
-    Dialog {
-        id: dlgLoop
-        title: qsTr("Confirm Loop Mode")
-        standardButtons: Dialog.Yes | Dialog.No
-        modal: true
-        width: 400
-        
-        contentItem: Text {
-            text: qsTr("Enabling loop mode will clear all existing Waypoints, Start, and Goal points. Continue?")
-            wrapMode: Text.WordWrap
-            padding: 10
-        }
-        onAccepted: map.confirmLoopModeActivation();
-        onRejected: {} 
-    }
-
-    Dialog {
-        id: dlgNonLoop
-        title: qsTr("Confirm Non-Loop Mode")
-        standardButtons: Dialog.Yes | Dialog.No
-        modal: true
-        width: 400
-        
-        contentItem: Text {
-            text: qsTr("Disabling loop mode will clear all existing Waypoints. Continue?")
-            wrapMode: Text.WordWrap
-            padding: 10
-        }
-        onAccepted: map.confirmNonLoopModeActivation();
-        onRejected: {}
     }
 }
