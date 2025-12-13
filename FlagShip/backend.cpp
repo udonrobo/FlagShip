@@ -213,6 +213,13 @@ void Backend::generateHppFile(const QString& speedStr, const QString& angleStr,
     out << "const float defSpeed = " << QString::number(defSpeed / 1000.0, 'f', 3) << "f;\n";
     out << "const float defAngle = " << QString::number(defAngle, 'f', 1) << "f;\n\n";
 
+    out << "// 公開データ\n";
+    out << "inline const PathDefinition path = {\n";
+    out << "    segTotal,\n";
+    out << "    segCounts,\n";
+    out << "    segments\n";
+    out << "};\n\n";
+
     out << "} // namespace " << ns << "\n";
 }
 
